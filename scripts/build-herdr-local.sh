@@ -50,8 +50,17 @@ say() { printf '\n== %s\n' "$*"; }
 # cargo silently builds with whatever version it happens to be, which is not the
 # version this tree is locked against.
 command -v rustup >/dev/null 2>&1 || die \
-  "rustup is required (rust-toolchain.toml pins 1.96.1; a Homebrew cargo ignores it).
+  "rustup is required (rust-toolchain.toml pins the compiler; a Homebrew cargo ignores it).
    Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+
+# rustup reads rust-toolchain.toml from the *current* directory, and this script
+# builds by --manifest-path from wherever it was invoked. Name the pinned
+# toolchain explicitly or cargo runs on whatever happens to be default.
+pinned_toolchain="$(awk -F'"' '/^channel/ {print $2; exit}' "$REPO_ROOT/rust-toolchain.toml")"
+[[ -n "$pinned_toolchain" ]] || die "could not read the pinned toolchain from rust-toolchain.toml"
+rustup toolchain list | grep -q "^${pinned_toolchain}" \
+  || rustup toolchain install "$pinned_toolchain" --profile minimal
+export RUSTUP_TOOLCHAIN="$pinned_toolchain"
 
 # build.rs builds the vendored libghostty-vt with Zig 0.15.x. Upstream's macOS
 # release job uses Homebrew's zig@0.15 specifically, so prefer that one.
@@ -111,7 +120,14 @@ if [[ -e "$INSTALL_PATH" ]]; then
   cp -p "$INSTALL_PATH" "$backup"
   say "previous binary kept at $backup"
 fi
-install -m 0755 "$built" "$INSTALL_PATH"
+# Replace by rename, never in place. `install` truncates its destination, and
+# that destination is the file a running herdr server is executing: macOS answers
+# with ETXTBSY at best, and a half-written binary is what a crashed session looks
+# like. A rename swaps the directory entry; the running process keeps its old
+# inode until it is restarted, which is exactly the wanted behaviour - the new
+# binary takes effect on the next `herdr session stop`, not under a live session.
+install -m 0755 "$built" "$INSTALL_PATH.new"
+mv -f "$INSTALL_PATH.new" "$INSTALL_PATH"
 say "installed $INSTALL_PATH -> $("$INSTALL_PATH" --version)"
 
 # --- keep the update checker from replacing it -------------------------------

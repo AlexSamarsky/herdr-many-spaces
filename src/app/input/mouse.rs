@@ -2428,6 +2428,7 @@ mod tests {
 
     fn mark_worktree_space_member(workspace: &mut Workspace, ws_idx: usize, key: &str) {
         workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: key.into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),

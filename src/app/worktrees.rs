@@ -386,6 +386,7 @@ impl App {
         {
             let source_membership = source_existing_membership.clone().unwrap_or(
                 crate::workspace::WorktreeSpaceMembership {
+                    parent_workspace_id: None,
                     key: repo_key.clone(),
                     label: repo_name.clone(),
                     repo_root: source_repo_root.clone(),
@@ -401,6 +402,9 @@ impl App {
                 self.set_worktree_membership(
                     new_ws_idx,
                     crate::workspace::WorktreeSpaceMembership {
+                        parent_workspace_id: entry
+                            .is_linked_worktree
+                            .then(|| source_workspace_id.clone()),
                         key: repo_key,
                         label: repo_name,
                         repo_root: source_repo_root,
@@ -455,6 +459,7 @@ impl App {
         {
             let source_membership =
                 source_existing_membership.unwrap_or(crate::workspace::WorktreeSpaceMembership {
+                    parent_workspace_id: None,
                     key: repo_key.clone(),
                     label: repo_name.clone(),
                     repo_root: source_repo_root.clone(),
@@ -466,6 +471,8 @@ impl App {
         self.set_worktree_membership(
             target_ws_idx,
             crate::workspace::WorktreeSpaceMembership {
+                parent_workspace_id: target_is_linked_worktree
+                    .then(|| source_workspace_id.to_string()),
                 key: repo_key,
                 label: repo_name,
                 repo_root: source_repo_root,
@@ -804,6 +811,7 @@ impl App {
                 self.state.name_input_replace_on_type = false;
                 let source_membership = source_existing_membership.unwrap_or(
                     crate::workspace::WorktreeSpaceMembership {
+                        parent_workspace_id: None,
                         key: repo_key.clone(),
                         label: repo_name.clone(),
                         repo_root: source_repo_root.clone(),
@@ -823,6 +831,7 @@ impl App {
                     self.set_worktree_membership(
                         ws_idx,
                         crate::workspace::WorktreeSpaceMembership {
+                            parent_workspace_id: Some(source_workspace_id.clone()),
                             key: repo_key,
                             label: repo_name,
                             repo_root: source_repo_root,
@@ -842,6 +851,7 @@ impl App {
                             self.set_worktree_membership(
                                 ws_idx,
                                 crate::workspace::WorktreeSpaceMembership {
+                                    parent_workspace_id: Some(source_workspace_id.clone()),
                                     key: repo_key,
                                     label: repo_name,
                                     repo_root: source_repo_root,
@@ -1281,6 +1291,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("source")];
         let source_workspace_id = app.state.workspaces[0].id.clone();
         let source_membership = crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -1494,6 +1505,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("issue")];
         app.state.mode = Mode::Navigate;
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -1556,6 +1568,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("source")];
         let source_workspace_id = app.state.workspaces[0].id.clone();
         let source_membership = crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -1615,6 +1628,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("source")];
         let source_workspace_id = app.state.workspaces[0].id.clone();
         let source_membership = crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: repo.clone(),
@@ -1669,6 +1683,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("issue")];
         let workspace_id = app.state.workspaces[0].id.clone();
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -1714,6 +1729,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("source")];
         let source_workspace_id = app.state.workspaces[0].id.clone();
         let source_membership = crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: repo.clone(),
@@ -2175,6 +2191,7 @@ mod tests {
             crate::workspace::Workspace::test_new("sibling"),
         ];
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2182,6 +2199,7 @@ mod tests {
             is_linked_worktree: false,
         });
         app.state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2189,6 +2207,7 @@ mod tests {
             is_linked_worktree: true,
         });
         app.state.workspaces[2].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2234,6 +2253,7 @@ mod tests {
         let internal_workspace_id = app.state.workspaces[0].id.clone();
         let checkout = std::path::PathBuf::from("/repo/herdr-issue");
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2314,6 +2334,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("issue")];
         let workspace_id = app.state.workspaces[0].id.clone();
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: repo.clone(),

@@ -436,6 +436,7 @@ mod tests {
         let mut child = Workspace::test_new("test");
         child.custom_name = None;
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo".into(),
             label: "repo".into(),
             repo_root: "/repo".into(),
@@ -454,6 +455,7 @@ mod tests {
         let mut app = test_app(&config);
         let mut child = Workspace::test_new("custom");
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo".into(),
             label: "repo".into(),
             repo_root: "/repo".into(),

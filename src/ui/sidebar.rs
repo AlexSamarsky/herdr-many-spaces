@@ -251,7 +251,11 @@ fn workspace_attention_priority(state: AgentState, seen: bool) -> u8 {
 fn space_aggregate_state(app: &AppState, key: &str) -> (AgentState, bool) {
     app.workspaces
         .iter()
-        .filter(|ws| ws.worktree_space().is_some_and(|space| space.key == key))
+        .enumerate()
+        .filter(|(ws_idx, _)| {
+            crate::workspace::worktree_group_key(&app.workspaces, *ws_idx).as_deref() == Some(key)
+        })
+        .map(|(_, ws)| ws)
         .map(|ws| ws.aggregate_state(&app.terminals))
         .max_by_key(|(state, seen)| workspace_attention_priority(*state, *seen))
         .unwrap_or((AgentState::Unknown, true))
@@ -265,19 +269,16 @@ pub(crate) fn workspace_parent_group_state(
     if space.is_linked_worktree {
         return None;
     }
-    let member_count = app
-        .workspaces
-        .iter()
-        .filter(|ws| {
-            ws.worktree_space()
-                .is_some_and(|member| member.key == space.key)
+    let group_key = crate::workspace::worktree_group_key(&app.workspaces, ws_idx)?;
+    let member_count = (0..app.workspaces.len())
+        .filter(|idx| {
+            crate::workspace::worktree_group_key(&app.workspaces, *idx).as_deref()
+                == Some(group_key.as_str())
         })
         .count();
     (member_count >= 2).then(|| {
-        (
-            space.key.clone(),
-            app.collapsed_space_keys.contains(&space.key),
-        )
+        let collapsed = app.collapsed_space_keys.contains(&group_key);
+        (group_key, collapsed)
     })
 }
 
@@ -336,13 +337,12 @@ pub(crate) fn workspace_list_entries_expanded(app: &AppState) -> Vec<WorkspaceLi
 }
 
 fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<WorkspaceListEntry> {
+    // Keyed by the owning space, not by the repository: two spaces standing on
+    // one `.git` are two groups, and a row joins the one that opened it.
     let mut members_by_key = std::collections::HashMap::<String, Vec<usize>>::new();
-    for (ws_idx, ws) in app.workspaces.iter().enumerate() {
-        if let Some(space) = ws.worktree_space() {
-            members_by_key
-                .entry(space.key.clone())
-                .or_default()
-                .push(ws_idx);
+    for ws_idx in 0..app.workspaces.len() {
+        if let Some(group_key) = crate::workspace::worktree_group_key(&app.workspaces, ws_idx) {
+            members_by_key.entry(group_key).or_default().push(ws_idx);
         }
     }
     let grouped_keys = members_by_key
@@ -364,19 +364,14 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
     } else {
         app.active
     };
-    let active_group = visible_group_idx.and_then(|idx| {
-        app.workspaces
-            .get(idx)
-            .and_then(|ws| ws.worktree_space())
-            .map(|space| space.key.clone())
-    });
+    let active_group = visible_group_idx
+        .and_then(|idx| crate::workspace::worktree_group_key(&app.workspaces, idx));
 
     let mut emitted_groups = std::collections::HashSet::<String>::new();
     let mut entries = Vec::new();
-    for (ws_idx, ws) in app.workspaces.iter().enumerate() {
-        let Some(space) = ws
-            .worktree_space()
-            .filter(|space| grouped_keys.contains(&space.key))
+    for ws_idx in 0..app.workspaces.len() {
+        let Some(group_key) = crate::workspace::worktree_group_key(&app.workspaces, ws_idx)
+            .filter(|group_key| grouped_keys.contains(group_key))
         else {
             entries.push(WorkspaceListEntry::Workspace {
                 ws_idx,
@@ -385,26 +380,40 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
             continue;
         };
 
-        if !emitted_groups.insert(space.key.clone()) {
+        if !emitted_groups.insert(group_key.clone()) {
             continue;
         }
 
-        let Some(members) = members_by_key.get(&space.key) else {
+        let Some(members) = members_by_key.get(&group_key) else {
             continue;
         };
-        let Some(parent_idx) = members.iter().copied().find(|idx| {
-            app.workspaces
-                .get(*idx)
-                .and_then(|member| member.worktree_space())
-                .is_some_and(|member_space| !member_space.is_linked_worktree)
-        }) else {
+        // The owner heads its group. It is the member whose own id is the group
+        // key; the first unlinked member is the fallback for a group whose owner
+        // is not open, so its rows still render under something.
+        let Some(parent_idx) = members
+            .iter()
+            .copied()
+            .find(|idx| {
+                app.workspaces
+                    .get(*idx)
+                    .is_some_and(|member| member.id == group_key)
+            })
+            .or_else(|| {
+                members.iter().copied().find(|idx| {
+                    app.workspaces
+                        .get(*idx)
+                        .and_then(|member| member.worktree_space())
+                        .is_some_and(|member_space| !member_space.is_linked_worktree)
+                })
+            })
+        else {
             entries.push(WorkspaceListEntry::Workspace {
                 ws_idx,
                 indented: false,
             });
             continue;
         };
-        let collapsed = !force_expanded && app.collapsed_space_keys.contains(&space.key);
+        let collapsed = !force_expanded && app.collapsed_space_keys.contains(&group_key);
         entries.push(WorkspaceListEntry::Workspace {
             ws_idx: parent_idx,
             indented: false,
@@ -413,7 +422,7 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
         if collapsed {
             if let Some(active_idx) = visible_group_idx
                 .filter(|idx| *idx != parent_idx)
-                .filter(|_| active_group.as_deref() == Some(space.key.as_str()))
+                .filter(|_| active_group.as_deref() == Some(group_key.as_str()))
             {
                 entries.push(WorkspaceListEntry::Workspace {
                     ws_idx: active_idx,
@@ -2694,6 +2703,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let mut ws = crate::workspace::Workspace::test_new(name);
         if let Some(key) = key {
             ws.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+                parent_workspace_id: None,
                 key: key.into(),
                 label: "herdr".into(),
                 repo_root: std::path::PathBuf::from("/repo/herdr"),
@@ -2996,6 +3006,129 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
         ];
 
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 1,
+                    indented: true,
+                },
+            ]
+        );
+    }
+
+    fn workspace_owning_root(name: &str, id: &str, key: &str) -> crate::workspace::Workspace {
+        let mut ws = crate::workspace::Workspace::test_new(name);
+        ws.id = id.into();
+        ws.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
+            key: key.into(),
+            label: "herdr".into(),
+            repo_root: std::path::PathBuf::from("/repo/herdr"),
+            checkout_path: std::path::PathBuf::from("/repo/herdr"),
+            is_linked_worktree: false,
+        });
+        ws
+    }
+
+    fn workspace_row_owned_by(
+        name: &str,
+        id: &str,
+        key: &str,
+        owner: Option<&str>,
+    ) -> crate::workspace::Workspace {
+        let mut ws = crate::workspace::Workspace::test_new(name);
+        ws.id = id.into();
+        ws.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: owner.map(str::to_string),
+            key: key.into(),
+            label: "herdr".into(),
+            repo_root: std::path::PathBuf::from("/repo/herdr"),
+            checkout_path: std::path::PathBuf::from(format!("/repo/{name}")),
+            is_linked_worktree: true,
+        });
+        ws
+    }
+
+    #[test]
+    fn workspace_list_entries_group_rows_under_the_space_that_opened_them() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_owning_root("repo", "wrepo", "repo-key"),
+            workspace_owning_root("agent1", "wagent1", "repo-key"),
+            workspace_row_owned_by("tree1", "wtree1", "repo-key", Some("wagent1")),
+            workspace_owning_root("agent2", "wagent2", "repo-key"),
+            workspace_row_owned_by("tree2", "wtree2", "repo-key", Some("wagent2")),
+        ];
+
+        // One repository, three spaces, two groups: each agent holds the row it
+        // opened and the repository's own space holds nothing.
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 1,
+                    indented: false,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 2,
+                    indented: true,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 3,
+                    indented: false,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 4,
+                    indented: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_list_entries_do_not_merge_two_spaces_on_one_repository() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_owning_root("repo", "wrepo", "repo-key"),
+            workspace_owning_root("cycle", "wcycle", "repo-key"),
+        ];
+
+        // Sharing a `.git` is not membership: neither space is drawn inside the
+        // other, which is what used to happen to every development cycle.
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 1,
+                    indented: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_list_entries_group_rows_without_an_owner_under_the_first_parent() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_owning_root("repo", "wrepo", "repo-key"),
+            workspace_row_owned_by("legacy", "wlegacy", "repo-key", None),
+        ];
+
+        // A row restored from a session written before rows recorded an owner
+        // keeps the shape the key-based grouping gave it.
         assert_eq!(
             workspace_list_entries(&app),
             vec![

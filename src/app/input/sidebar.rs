@@ -419,19 +419,19 @@ impl AppState {
             return None;
         }
 
-        let workspace_ids = match source.worktree_space() {
-            Some(source_space) => {
+        let source_group_key =
+            crate::workspace::worktree_group_key(&self.workspaces, source_ws_idx);
+        let workspace_ids = match source_group_key.as_deref() {
+            Some(source_group_key) => {
                 let mut ids = vec![source.id.clone()];
                 ids.extend(
-                    self.workspaces
-                        .iter()
-                        .filter(|workspace| workspace.id != source.id)
-                        .filter(|workspace| {
-                            workspace
-                                .worktree_space()
-                                .is_some_and(|space| space.key == source_space.key)
+                    (0..self.workspaces.len())
+                        .filter(|idx| self.workspaces[*idx].id != source.id)
+                        .filter(|idx| {
+                            crate::workspace::worktree_group_key(&self.workspaces, *idx).as_deref()
+                                == Some(source_group_key)
                         })
-                        .map(|workspace| workspace.id.clone()),
+                        .map(|idx| self.workspaces[idx].id.clone()),
                 );
                 ids
             }
@@ -440,17 +440,17 @@ impl AppState {
         let before_workspace_id = match drop_target {
             crate::app::state::WorkspaceDropTarget::Before(target_ws_idx) => {
                 let target = self.workspaces.get(target_ws_idx)?;
+                let target_group_key =
+                    crate::workspace::worktree_group_key(&self.workspaces, target_ws_idx);
                 let anchor = match crate::ui::workspace_parent_group_state(self, target_ws_idx)
-                    .and_then(|_| target.worktree_space())
+                    .and(target_group_key)
                 {
-                    Some(target_space) => self
-                        .workspaces
-                        .iter()
-                        .find(|workspace| {
-                            workspace
-                                .worktree_space()
-                                .is_some_and(|space| space.key == target_space.key)
+                    Some(target_group_key) => (0..self.workspaces.len())
+                        .find(|idx| {
+                            crate::workspace::worktree_group_key(&self.workspaces, *idx).as_deref()
+                                == Some(target_group_key.as_str())
                         })
+                        .map(|idx| &self.workspaces[idx])
                         .unwrap_or(target),
                     None => target,
                 };
@@ -1218,6 +1218,7 @@ mod tests {
         for (idx, checkout_path) in ["/repo/herdr", "/repo/herdr-issue"].into_iter().enumerate() {
             app.state.workspaces[idx].worktree_space =
                 Some(crate::workspace::WorktreeSpaceMembership {
+                    parent_workspace_id: None,
                     key: "repo-key".into(),
                     label: "herdr".into(),
                     repo_root: "/repo/herdr".into(),
@@ -1252,6 +1253,7 @@ mod tests {
         for (idx, checkout_path) in ["/repo/herdr", "/repo/herdr-issue"].into_iter().enumerate() {
             app.state.workspaces[idx].worktree_space =
                 Some(crate::workspace::WorktreeSpaceMembership {
+                    parent_workspace_id: None,
                     key: "repo-key".into(),
                     label: "herdr".into(),
                     repo_root: "/repo/herdr".into(),
@@ -1271,9 +1273,10 @@ mod tests {
             chevron.y,
         ));
 
+        let group_key = app.state.workspaces[0].id.clone();
         assert_eq!(app.state.active, None);
         assert!(app.state.workspace_presses.is_empty());
-        assert!(app.state.collapsed_space_keys.contains("repo-key"));
+        assert!(app.state.collapsed_space_keys.contains(&group_key));
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -1281,7 +1284,7 @@ mod tests {
             chevron.y,
         ));
 
-        assert!(!app.state.collapsed_space_keys.contains("repo-key"));
+        assert!(!app.state.collapsed_space_keys.contains(&group_key));
     }
 
     #[test]
@@ -1295,6 +1298,7 @@ mod tests {
         for (idx, checkout_path) in [(0, "/repo/herdr"), (2, "/repo/herdr-issue")] {
             app.state.workspaces[idx].worktree_space =
                 Some(crate::workspace::WorktreeSpaceMembership {
+                    parent_workspace_id: None,
                     key: "repo-key".into(),
                     label: "herdr".into(),
                     repo_root: "/repo/herdr".into(),
@@ -1540,6 +1544,7 @@ mod tests {
     fn workspace_with_space(name: &str, key: &str) -> Workspace {
         let mut ws = Workspace::test_new(name);
         ws.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: key.into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -1754,7 +1759,11 @@ mod tests {
         ];
         app.state.active = Some(0);
         app.state.selected = 1;
-        app.state.collapsed_space_keys.insert("repo-key".into());
+        // "main" owns the group: the rows carry no owner of their own, so they
+        // fall back to the first parent on the repository, which is that space.
+        app.state
+            .collapsed_space_keys
+            .insert(app.state.workspaces[2].id.clone());
         let active_id = app.state.workspaces[0].id.clone();
         let selected_id = app.state.workspaces[1].id.clone();
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 40));

@@ -1431,6 +1431,7 @@ mod tests {
     fn worktree_workspace(name: &str, key: &str, linked: bool) -> crate::workspace::Workspace {
         let mut ws = crate::workspace::Workspace::test_new(name);
         ws.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: key.into(),
             label: "herdr".into(),
             repo_root: std::path::PathBuf::from("/repo/herdr"),

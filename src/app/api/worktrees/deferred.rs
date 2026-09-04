@@ -62,6 +62,7 @@ impl App {
 
         if let Some(current) = workspace.worktree_space() {
             let expected = crate::workspace::WorktreeSpaceMembership {
+                parent_workspace_id: None,
                 key: api.repo_key.clone(),
                 label: api.repo_name.clone(),
                 repo_root: api.source_repo_root.clone(),

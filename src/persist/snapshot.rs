@@ -883,6 +883,7 @@ mod tests {
     fn capture_contract_tracks_worktree_space_membership() {
         let mut state = state_with_workspaces(&["main"]);
         state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: PathBuf::from("/repo/herdr"),

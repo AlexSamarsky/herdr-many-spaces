@@ -1682,14 +1682,12 @@ impl AppState {
             .get(self.selected)
             .and_then(|ws| ws.worktree_space())
             .filter(|space| !space.is_linked_worktree)
-            .map(|space| {
-                self.workspaces
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, ws)| {
-                        ws.worktree_space()
-                            .is_some_and(|member| member.key == space.key)
-                            .then_some(idx)
+            .and_then(|_| crate::workspace::worktree_group_key(&self.workspaces, self.selected))
+            .map(|group_key| {
+                (0..self.workspaces.len())
+                    .filter(|idx| {
+                        crate::workspace::worktree_group_key(&self.workspaces, *idx).as_deref()
+                            == Some(group_key.as_str())
                     })
                     .collect::<Vec<_>>()
             })
@@ -1989,12 +1987,12 @@ impl AppState {
             .get(ws_idx)
             .and_then(|ws| ws.worktree_space())
             .filter(|space| !space.is_linked_worktree)
-            .is_some_and(|space| {
-                self.workspaces
-                    .iter()
-                    .filter(|ws| {
-                        ws.worktree_space()
-                            .is_some_and(|member| member.key == space.key)
+            .and_then(|_| crate::workspace::worktree_group_key(&self.workspaces, ws_idx))
+            .is_some_and(|group_key| {
+                (0..self.workspaces.len())
+                    .filter(|idx| {
+                        crate::workspace::worktree_group_key(&self.workspaces, *idx).as_deref()
+                            == Some(group_key.as_str())
                     })
                     .count()
                     >= 2
@@ -3434,6 +3432,7 @@ mod tests {
 
     fn mark_linked_worktree(state: &mut AppState, ws_idx: usize) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -3444,6 +3443,7 @@ mod tests {
 
     fn mark_parent_worktree(state: &mut AppState, ws_idx: usize) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -4664,6 +4664,7 @@ mod tests {
     fn close_parent_worktree_workspace_closes_group() {
         let mut state = app_with_workspaces(&["main", "issue", "notes"]);
         state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -4671,6 +4672,7 @@ mod tests {
             is_linked_worktree: false,
         });
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),

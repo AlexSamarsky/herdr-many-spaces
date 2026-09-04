@@ -898,6 +898,7 @@ mod tests {
         let mut app = AppState::test_new();
         let mut parent = Workspace::test_new("main");
         parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -906,6 +907,7 @@ mod tests {
         });
         let mut child = Workspace::test_new("issue");
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),

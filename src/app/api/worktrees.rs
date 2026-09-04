@@ -287,11 +287,31 @@ impl App {
             ));
         };
         if let Some(membership) = ws.worktree_space() {
+            // A row cannot own another row, but the caller standing in one is not
+            // asking it to: it is asking for a worktree of the same repository.
+            // Herdr used to refuse (`linked_worktree_source`), which is why a
+            // pane inside a worktree could not use its own injected
+            // HERDR_WORKSPACE_ID and every script had to special-case it. The
+            // row knows who opened it, so answer with that owner instead.
             if membership.is_linked_worktree {
-                return Err(ApiFailure::new(
-                    "linked_worktree_source",
-                    "New and open worktree actions start from the repo parent workspace.",
-                ));
+                let owner_idx = membership
+                    .parent_workspace_id
+                    .as_deref()
+                    .and_then(|id| self.state.workspaces.iter().position(|ws| ws.id == id))
+                    .or_else(|| self.find_parent_workspace_by_key(&membership.key));
+                let Some(owner_idx) = owner_idx else {
+                    return Err(ApiFailure::new(
+                        "linked_worktree_source",
+                        "New and open worktree actions start from the repo parent workspace.",
+                    ));
+                };
+                return Ok(WorktreeSource {
+                    workspace_idx: Some(owner_idx),
+                    source_checkout_path: membership.repo_root.clone(),
+                    source_repo_root: membership.repo_root.clone(),
+                    repo_key: membership.key.clone(),
+                    repo_name: membership.label.clone(),
+                });
             }
             return Ok(WorktreeSource {
                 workspace_idx: Some(ws_idx),
@@ -395,7 +415,7 @@ impl App {
         }
         if let Some(ws_idx) = source.workspace_idx {
             let membership =
-                worktree_membership(source, source.source_checkout_path.clone(), false);
+                worktree_membership(source, source.source_checkout_path.clone(), false, None);
             self.set_worktree_membership(ws_idx, membership, !created_parent);
             if created_parent && emit_created_event {
                 self.emit_workspace_open_events(ws_idx);
@@ -442,7 +462,19 @@ impl App {
         target_is_linked_worktree: bool,
         emit_update: bool,
     ) {
-        let membership = worktree_membership(source, target_path, target_is_linked_worktree);
+        let parent_workspace_id = target_is_linked_worktree
+            .then(|| {
+                source
+                    .workspace_idx
+                    .map(|idx| self.public_workspace_id(idx))
+            })
+            .flatten();
+        let membership = worktree_membership(
+            source,
+            target_path,
+            target_is_linked_worktree,
+            parent_workspace_id,
+        );
         self.set_worktree_membership(target_ws_idx, membership, emit_update);
     }
 
@@ -706,8 +738,10 @@ fn worktree_membership(
     source: &WorktreeSource,
     checkout_path: PathBuf,
     is_linked_worktree: bool,
+    parent_workspace_id: Option<String>,
 ) -> crate::workspace::WorktreeSpaceMembership {
     crate::workspace::WorktreeSpaceMembership {
+        parent_workspace_id,
         key: source.repo_key.clone(),
         label: source.repo_name.clone(),
         repo_root: source.source_repo_root.clone(),
@@ -1171,6 +1205,7 @@ mod tests {
         app.pending_api_worktree_creates
             .insert(checkout_key.clone(), 9);
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "other-key".into(),
             label: "other".into(),
             repo_root: "/repo/other".into(),
@@ -1442,6 +1477,172 @@ mod tests {
 
         let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false);
         crate::worktree::run_worktree_command(&remove).unwrap();
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn api_worktree_open_records_the_opening_workspace_as_owner() {
+        let repo = create_committed_repo("api-worktree-owner-repo");
+        let checkout = unique_temp_path("api-worktree-owner-checkout");
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "worktree/api-owner",
+                checkout.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+
+        // Two spaces stand on the same checkout: the repository's own space and a
+        // development cycle. The row must belong to whoever opened it, which is
+        // the cycle, not whichever space comes first in the list.
+        let mut app = test_app();
+        app.state.default_shell = test_shell().into();
+        let mut parent = Workspace::test_new("main");
+        parent.identity_cwd = repo.clone();
+        let mut cycle = Workspace::test_new("cycle");
+        cycle.identity_cwd = repo.clone();
+        let mut row = Workspace::test_new("row");
+        row.identity_cwd = checkout.clone();
+        app.state.workspaces = vec![parent, cycle, row];
+        app.state.ensure_test_terminals();
+        let cycle_id = app.state.workspaces[1].id.clone();
+
+        let response = app.handle_api_request(Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::WorktreeOpen(WorktreeOpenParams {
+                workspace_id: Some(cycle_id.clone()),
+                path: Some(checkout.to_string_lossy().into_owned()),
+                focus: false,
+                ..WorktreeOpenParams::default()
+            }),
+        });
+
+        let success: SuccessResponse = serde_json::from_str(&response)
+            .unwrap_or_else(|_| panic!("expected success, got {response}"));
+        let ResponseResult::WorktreeOpened {
+            workspace,
+            already_open,
+            ..
+        } = success.result
+        else {
+            panic!("expected worktree_opened response");
+        };
+        assert!(already_open);
+        assert_eq!(workspace.workspace_id, app.state.workspaces[2].id);
+
+        let row_space = app.state.workspaces[2]
+            .worktree_space()
+            .expect("row membership");
+        assert!(row_space.is_linked_worktree);
+        assert_eq!(
+            row_space.parent_workspace_id.as_deref(),
+            Some(cycle_id.as_str())
+        );
+
+        // The owner heads its own group, so it points at nobody.
+        let owner_space = app.state.workspaces[1]
+            .worktree_space()
+            .expect("owner membership");
+        assert!(!owner_space.is_linked_worktree);
+        assert_eq!(owner_space.parent_workspace_id, None);
+
+        let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false);
+        crate::worktree::run_worktree_command(&remove).unwrap();
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn api_worktree_open_from_a_row_resolves_to_its_owner() {
+        let repo = create_committed_repo("api-worktree-from-row-repo");
+        let first = unique_temp_path("api-worktree-from-row-first");
+        let second = unique_temp_path("api-worktree-from-row-second");
+        for (path, branch) in [
+            (&first, "worktree/from-row-one"),
+            (&second, "worktree/from-row-two"),
+        ] {
+            run_git(
+                &repo,
+                &[
+                    "worktree",
+                    "add",
+                    "--quiet",
+                    "-b",
+                    branch,
+                    path.to_str().unwrap(),
+                    "HEAD",
+                ],
+            );
+        }
+
+        let mut app = test_app();
+        app.state.default_shell = test_shell().into();
+        let mut cycle = Workspace::test_new("cycle");
+        cycle.identity_cwd = repo.clone();
+        let mut first_row = Workspace::test_new("first");
+        first_row.identity_cwd = first.clone();
+        let mut second_row = Workspace::test_new("second");
+        second_row.identity_cwd = second.clone();
+        app.state.workspaces = vec![cycle, first_row, second_row];
+        app.state.ensure_test_terminals();
+        let cycle_id = app.state.workspaces[0].id.clone();
+        let repo_space = crate::workspace::git_space_metadata(&repo).expect("repo space");
+        app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
+            key: repo_space.key.clone(),
+            label: repo_space.repo_name.clone(),
+            repo_root: repo.clone(),
+            checkout_path: repo.clone(),
+            is_linked_worktree: false,
+        });
+        app.state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: Some(cycle_id.clone()),
+            key: repo_space.key.clone(),
+            label: repo_space.repo_name.clone(),
+            repo_root: repo.clone(),
+            checkout_path: first.clone(),
+            is_linked_worktree: true,
+        });
+        let row_id = app.state.workspaces[1].id.clone();
+
+        // Standing in a row, asking for another worktree of the same repository:
+        // herdr used to refuse with `linked_worktree_source`, which is why a pane
+        // inside a worktree could not use its own injected workspace id. The row
+        // knows its owner, so the answer is that owner and the second row joins
+        // the same group.
+        let response = app.handle_api_request(Request {
+            id: "second".into(),
+            method: crate::api::schema::Method::WorktreeOpen(WorktreeOpenParams {
+                workspace_id: Some(row_id),
+                path: Some(second.to_string_lossy().into_owned()),
+                focus: false,
+                ..WorktreeOpenParams::default()
+            }),
+        });
+
+        let success: SuccessResponse = serde_json::from_str(&response)
+            .unwrap_or_else(|_| panic!("expected success, got {response}"));
+        let ResponseResult::WorktreeOpened { workspace, .. } = success.result else {
+            panic!("expected worktree_opened response, got {response}");
+        };
+        assert_eq!(workspace.workspace_id, app.state.workspaces[2].id);
+        assert_eq!(
+            app.state.workspaces[2]
+                .worktree_space()
+                .expect("second row membership")
+                .parent_workspace_id
+                .as_deref(),
+            Some(cycle_id.as_str())
+        );
+
+        for path in [&first, &second] {
+            let remove = crate::worktree::build_worktree_remove_command(&repo, path, false);
+            crate::worktree::run_worktree_command(&remove).unwrap();
+        }
         let _ = std::fs::remove_dir_all(repo);
     }
 
@@ -1750,6 +1951,7 @@ mod tests {
         let mut child = Workspace::test_new("child");
         child.identity_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-repo".into(),
             repo_root: repo.clone(),
@@ -1819,6 +2021,7 @@ mod tests {
         let mut child = Workspace::test_new("child");
         child.identity_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-event-repo".into(),
             repo_root: repo.clone(),
@@ -1903,6 +2106,7 @@ mod tests {
         let mut child = Workspace::test_new("child");
         child.identity_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-deferred-repo".into(),
             repo_root: repo.clone(),
@@ -1978,6 +2182,7 @@ mod tests {
         let mut child = Workspace::test_new("child");
         child.identity_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-duplicate-repo".into(),
             repo_root: repo.clone(),
@@ -2040,6 +2245,7 @@ mod tests {
 
         let mut app = test_app();
         let membership = crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-duplicate-path-repo".into(),
             repo_root: repo.clone(),
@@ -2145,6 +2351,7 @@ mod tests {
         let mut child = Workspace::test_new("child");
         child.identity_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-create-in-flight-repo".into(),
             repo_root: repo.clone(),
@@ -2187,6 +2394,7 @@ mod tests {
         let checkout = PathBuf::from("/repo/herdr-issue");
         let mut child = Workspace::test_new("child");
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2202,6 +2410,7 @@ mod tests {
         app.pending_api_worktree_remove_paths
             .insert(crate::worktree::canonical_or_original(&checkout), 7);
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),

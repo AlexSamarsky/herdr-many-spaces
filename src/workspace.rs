@@ -38,6 +38,20 @@ pub struct WorktreeSpaceMembership {
     pub repo_root: PathBuf,
     pub checkout_path: PathBuf,
     pub is_linked_worktree: bool,
+    /// Workspace that owns this row, as its stable public id.
+    ///
+    /// `key` identifies the repository, not the space that opened the worktree,
+    /// so every space standing on the same `.git` used to collapse into one
+    /// sidebar group: two development cycles on one repository could not each
+    /// hold their own worktrees, and a plain space on the repository root was
+    /// drawn as a second parent of a group it never asked to join.
+    ///
+    /// A row records its owner here at the moment it is opened. `None` means
+    /// either a parent (a space is its own group) or a row written by a build
+    /// before this field existed; both fall back to the repository key, which is
+    /// what the old grouping did.
+    #[serde(default)]
+    pub parent_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +220,38 @@ pub struct Workspace {
     pub active_tab: usize,
     #[cfg(test)]
     pub(crate) test_runtimes: HashMap<PaneId, TerminalRuntime>,
+}
+
+/// Identity of the sidebar group a workspace belongs to.
+///
+/// Grouping used to key on `WorktreeSpaceMembership::key`, the repository's
+/// common `.git`, so every space standing on one repository was drawn as a
+/// single group no matter who opened what. The group is now the *owning space*:
+///
+///   * a parent heads its own group and answers with its own workspace id, so
+///     two spaces on the same repository stay apart;
+///   * a row answers with the id of the space that opened it;
+///   * a row from a build older than `parent_workspace_id` answers with the
+///     first parent on its repository — the space the key-based grouping would
+///     have picked — so restored sessions keep the shape they had.
+pub fn worktree_group_key(workspaces: &[Workspace], ws_idx: usize) -> Option<String> {
+    let workspace = workspaces.get(ws_idx)?;
+    let space = workspace.worktree_space()?;
+    if !space.is_linked_worktree {
+        return Some(workspace.id.clone());
+    }
+    if let Some(parent) = space.parent_workspace_id.as_deref() {
+        return Some(parent.to_string());
+    }
+    workspaces
+        .iter()
+        .find(|candidate| {
+            candidate
+                .worktree_space()
+                .is_some_and(|member| member.key == space.key && !member.is_linked_worktree)
+        })
+        .map(|candidate| candidate.id.clone())
+        .or_else(|| Some(space.key.clone()))
 }
 
 impl Deref for Workspace {

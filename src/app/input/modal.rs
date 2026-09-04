@@ -786,12 +786,7 @@ pub(super) fn apply_context_menu_action(
             },
             Some("Collapse" | "Expand"),
         ) => {
-            if let Some(key) = state
-                .workspaces
-                .get(ws_idx)
-                .and_then(|ws| ws.worktree_space())
-                .map(|space| space.key.clone())
-            {
+            if let Some(key) = crate::workspace::worktree_group_key(&state.workspaces, ws_idx) {
                 if collapsed {
                     state.collapsed_space_keys.remove(&key);
                 } else {
@@ -1215,12 +1210,8 @@ impl App {
                 },
                 Some("Collapse" | "Expand"),
             ) => {
-                if let Some(key) = self
-                    .state
-                    .workspaces
-                    .get(ws_idx)
-                    .and_then(|ws| ws.worktree_space())
-                    .map(|space| space.key.clone())
+                if let Some(key) =
+                    crate::workspace::worktree_group_key(&self.state.workspaces, ws_idx)
                 {
                     if collapsed {
                         self.state.collapsed_space_keys.remove(&key);
@@ -1463,6 +1454,7 @@ mod tests {
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: key.into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2163,6 +2155,7 @@ mod tests {
         state.mode = Mode::ConfirmClose;
         state.selected = 1;
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2187,6 +2180,7 @@ mod tests {
         state.active = Some(0);
         state.selected = 1;
         state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2194,6 +2188,7 @@ mod tests {
             is_linked_worktree: false,
         });
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2263,6 +2258,7 @@ mod tests {
         state.active = Some(0);
         state.selected = 1;
         state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2270,6 +2266,7 @@ mod tests {
             is_linked_worktree: false,
         });
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),

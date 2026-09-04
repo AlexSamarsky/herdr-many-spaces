@@ -2030,6 +2030,7 @@ mod tests {
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: key.into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -2167,6 +2168,7 @@ mod tests {
         state.mode = Mode::Prefix;
         state.confirm_close = false;
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),
@@ -3422,6 +3424,7 @@ navigate_pane_down = "ctrl+j"
         state.mode = Mode::Navigate;
         state.confirm_close = false;
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            parent_workspace_id: None,
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: "/repo/herdr".into(),

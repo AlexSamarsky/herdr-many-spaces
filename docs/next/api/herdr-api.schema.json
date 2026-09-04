@@ -1141,6 +1141,12 @@
             "is_linked_worktree": {
               "type": "boolean"
             },
+            "parent_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "repo_key": {
               "type": "string"
             },
@@ -1184,6 +1190,12 @@
               "type": "string"
             },
             "open_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent_workspace_id": {
               "type": [
                 "string",
                 "null"
@@ -4288,6 +4300,12 @@
             },
             "is_linked_worktree": {
               "type": "boolean"
+            },
+            "parent_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "repo_key": {
               "type": "string"
@@ -10000,6 +10018,12 @@
             "is_linked_worktree": {
               "type": "boolean"
             },
+            "parent_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "repo_key": {
               "type": "string"
             },
@@ -10043,6 +10067,12 @@
               "type": "string"
             },
             "open_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent_workspace_id": {
               "type": [
                 "string",
                 "null"

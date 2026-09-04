@@ -2249,6 +2249,7 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
                     is_prunable: false,
                     is_linked_worktree: true,
                     open_workspace_id: Some(workspace.workspace_id),
+                    parent_workspace_id: None,
                     label: "feature".into(),
                 },
             },
@@ -2524,6 +2525,7 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
                     is_prunable: false,
                     is_linked_worktree: true,
                     open_workspace_id: Some(target_workspace.workspace_id.clone()),
+                    parent_workspace_id: None,
                     label: "feature".into(),
                 },
             },
@@ -2648,6 +2650,7 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
             is_prunable: false,
             is_linked_worktree: true,
             open_workspace_id: None,
+            parent_workspace_id: None,
             label: "herdr".into(),
         };
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {

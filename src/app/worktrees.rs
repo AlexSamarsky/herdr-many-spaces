@@ -2269,6 +2269,7 @@ mod tests {
             is_prunable: false,
             is_linked_worktree: true,
             open_workspace_id: None,
+            parent_workspace_id: None,
             label: "herdr".into(),
         };
         app.state.worktree_remove = Some(WorktreeRemoveState {

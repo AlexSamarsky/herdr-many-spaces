@@ -565,6 +565,10 @@ impl App {
     ) -> WorktreeInfo {
         let canonical_path = crate::worktree::canonical_or_original(&entry.path);
         let repo_root = crate::worktree::canonical_or_original(&source.source_repo_root);
+        // A checkout found on disk knows nothing about the sidebar. Its owner is
+        // whatever the workspace holding it recorded when it was opened, so it is
+        // reported only for a checkout that is actually open as a row.
+        let open_workspace_idx = self.open_workspace_idx_for_checkout(&canonical_path);
         WorktreeInfo {
             path: entry.path.display().to_string(),
             branch: entry.branch,
@@ -572,9 +576,11 @@ impl App {
             is_detached: entry.is_detached,
             is_prunable: entry.is_prunable,
             is_linked_worktree: canonical_path != repo_root,
-            open_workspace_id: self
-                .open_workspace_idx_for_checkout(&canonical_path)
-                .map(|idx| self.public_workspace_id(idx)),
+            open_workspace_id: open_workspace_idx.map(|idx| self.public_workspace_id(idx)),
+            parent_workspace_id: open_workspace_idx
+                .and_then(|idx| self.state.workspaces.get(idx))
+                .and_then(|ws| ws.worktree_space())
+                .and_then(|space| space.parent_workspace_id.clone()),
             label: source.repo_name.clone(),
         }
     }
@@ -594,6 +600,7 @@ impl App {
             is_prunable: false,
             is_linked_worktree: membership.is_linked_worktree,
             open_workspace_id,
+            parent_workspace_id: membership.parent_workspace_id.clone(),
             label: membership.label.clone(),
         }
     }
@@ -1550,6 +1557,111 @@ mod tests {
             .expect("owner membership");
         assert!(!owner_space.is_linked_worktree);
         assert_eq!(owner_space.parent_workspace_id, None);
+
+        let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false);
+        crate::worktree::run_worktree_command(&remove).unwrap();
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn api_snapshots_name_the_space_that_opened_the_row() {
+        // The owner is only useful if it leaves the process. Both listings are
+        // read by tooling that answers "which agent is on this branch?", and a
+        // field kept private to the sidebar would answer it with a blank column.
+        let repo = create_committed_repo("api-owner-snapshot-repo");
+        let checkout = unique_temp_path("api-owner-snapshot-checkout");
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "worktree/api-owner-snapshot",
+                checkout.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+
+        let mut app = test_app();
+        app.state.default_shell = test_shell().into();
+        let mut parent = Workspace::test_new("main");
+        parent.identity_cwd = repo.clone();
+        let mut cycle = Workspace::test_new("cycle");
+        cycle.identity_cwd = repo.clone();
+        let mut row = Workspace::test_new("row");
+        row.identity_cwd = checkout.clone();
+        app.state.workspaces = vec![parent, cycle, row];
+        app.state.ensure_test_terminals();
+        let cycle_id = app.state.workspaces[1].id.clone();
+        let row_id = app.state.workspaces[2].id.clone();
+
+        let response = app.handle_api_request(Request {
+            id: "open".into(),
+            method: crate::api::schema::Method::WorktreeOpen(WorktreeOpenParams {
+                workspace_id: Some(cycle_id.clone()),
+                path: Some(checkout.to_string_lossy().into_owned()),
+                focus: false,
+                ..WorktreeOpenParams::default()
+            }),
+        });
+        let _: SuccessResponse = serde_json::from_str(&response)
+            .unwrap_or_else(|_| panic!("expected success, got {response}"));
+
+        let response = app.handle_api_request(Request {
+            id: "workspaces".into(),
+            method: crate::api::schema::Method::WorkspaceList(
+                crate::api::schema::EmptyParams::default(),
+            ),
+        });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceList { workspaces } = success.result else {
+            panic!("expected workspace_list response");
+        };
+        let listed_row = workspaces
+            .iter()
+            .find(|entry| entry.workspace_id == row_id)
+            .expect("row listed");
+        let row_worktree = listed_row.worktree.as_ref().expect("row membership");
+        assert_eq!(
+            row_worktree.parent_workspace_id.as_deref(),
+            Some(cycle_id.as_str())
+        );
+
+        // The owner heads its own group, so it names nobody.
+        let listed_owner = workspaces
+            .iter()
+            .find(|entry| entry.workspace_id == cycle_id)
+            .expect("owner listed");
+        assert_eq!(
+            listed_owner
+                .worktree
+                .as_ref()
+                .expect("owner membership")
+                .parent_workspace_id,
+            None
+        );
+
+        let response = app.handle_api_request(Request {
+            id: "worktrees".into(),
+            method: crate::api::schema::Method::WorktreeList(WorktreeListParams {
+                workspace_id: Some(app.state.workspaces[0].id.clone()),
+                cwd: None,
+            }),
+        });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorktreeList { worktrees, .. } = success.result else {
+            panic!("expected worktree_list response");
+        };
+        let entry = worktrees
+            .iter()
+            .find(|entry| entry.branch.as_deref() == Some("worktree/api-owner-snapshot"))
+            .expect("checkout listed");
+        assert_eq!(entry.open_workspace_id.as_deref(), Some(row_id.as_str()));
+        assert_eq!(
+            entry.parent_workspace_id.as_deref(),
+            Some(cycle_id.as_str())
+        );
 
         let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false);
         crate::worktree::run_worktree_command(&remove).unwrap();

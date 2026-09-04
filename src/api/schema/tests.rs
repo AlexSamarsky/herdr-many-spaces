@@ -718,6 +718,7 @@ fn worktree_request_and_response_round_trip() {
                     repo_root: "/repo/herdr".into(),
                     checkout_path: "/worktrees/herdr/worktree-api".into(),
                     is_linked_worktree: true,
+                    parent_workspace_id: None,
                 }),
             },
             tab: TabInfo {
@@ -758,6 +759,7 @@ fn worktree_request_and_response_round_trip() {
                 is_prunable: false,
                 is_linked_worktree: true,
                 open_workspace_id: Some("w_1".into()),
+                parent_workspace_id: None,
                 label: "herdr".into(),
             },
         },
@@ -804,6 +806,7 @@ fn worktree_lifecycle_events_round_trip() {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/worktrees/herdr/worktree-api".into(),
             is_linked_worktree: true,
+            parent_workspace_id: None,
         }),
     };
     let worktree = WorktreeInfo {
@@ -814,6 +817,7 @@ fn worktree_lifecycle_events_round_trip() {
         is_prunable: false,
         is_linked_worktree: true,
         open_workspace_id: Some("w_2".into()),
+        parent_workspace_id: None,
         label: "herdr".into(),
     };
 

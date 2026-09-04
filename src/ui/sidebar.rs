@@ -2966,7 +2966,12 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         for workspace in &mut app.workspaces {
             workspace.cached_git_branch = Some("main".into());
         }
-        app.collapsed_space_keys.insert("repo-key".into());
+        // A group is keyed by the space that owns it, not by the repository, so the
+        // key is asked of `worktree_group_key` - the one authority the sidebar
+        // itself uses. A literal here would test a convention nothing follows.
+        app.collapsed_space_keys.insert(
+            crate::workspace::worktree_group_key(&app.workspaces, 0).expect("group key"),
+        );
         app.active = None;
         app.mode = Mode::Terminal;
 
@@ -2986,7 +2991,9 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
             Workspace::test_new("notes"),
         ];
-        app.collapsed_space_keys.insert("repo-key".into());
+        app.collapsed_space_keys.insert(
+            crate::workspace::worktree_group_key(&app.workspaces, 0).expect("group key"),
+        );
         app.active = None;
         app.mode = Mode::Terminal;
         app.workspace_scroll = 1;
@@ -3255,7 +3262,9 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         ];
         app.active = Some(1);
         app.mode = Mode::Terminal;
-        app.collapsed_space_keys.insert("repo-key".into());
+        app.collapsed_space_keys.insert(
+            crate::workspace::worktree_group_key(&app.workspaces, 0).expect("group key"),
+        );
 
         assert_eq!(
             workspace_list_entries(&app),
@@ -3292,7 +3301,9 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.mode = Mode::Navigate;
         app.selected = 1;
         app.active = Some(1);
-        app.collapsed_space_keys.insert("repo-key".into());
+        app.collapsed_space_keys.insert(
+            crate::workspace::worktree_group_key(&app.workspaces, 0).expect("group key"),
+        );
 
         assert_eq!(
             workspace_list_entries(&app),

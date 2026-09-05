@@ -61,6 +61,14 @@ prompt would replace the patched binary with a stock release. For the same
 reason, a stock client attached with `--remote` will offer to install its own
 version over the remote binary: attach with the patched client instead.
 
+## Keeping it on a new herdr release
+
+The change does not merge - upstream keeps moving the code it touches - so
+[MAINTAINING-THE-FORK.md](MAINTAINING-THE-FORK.md) states it as an invariant
+instead: what must be true, which symbols hold it today, how to make the compiler
+find the rest, and the tests that prove it landed. Read it before merging a new
+upstream release.
+
 ## Why a fork
 
 The change belongs upstream and cannot go there: pull requests from outside

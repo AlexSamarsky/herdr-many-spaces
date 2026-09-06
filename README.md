@@ -71,11 +71,16 @@ upstream release.
 
 ## Why a fork
 
-The change belongs upstream and cannot go there: pull requests from outside
-`.github/APPROVED_CONTRIBUTORS` are closed by a bot, issue #1739 (auto-resolve to
-the parent workspace when invoked from a linked-worktree workspace) was closed
-*not planned* on 2026-07-22, and PR #2753 was rejected by the contributor gate on
-2026-08-13. Everything below this line is upstream's README, unchanged.
+Upstream accepts no unsolicited implementation pull requests: anything from
+outside `.github/APPROVED_CONTRIBUTORS` is closed by a bot regardless of content,
+and `CONTRIBUTING.md` routes design changes to Discussions instead.
+
+Ownership itself has never been put to them. Two neighbouring things have, and
+neither closure judged the idea: issue #1739 asked for a linked-worktree source to
+resolve to its parent rather than erroring, and the issue bot closed it on
+2026-07-22 for using the bug template where a Discussion belongs; PR #2753
+implemented that same area and was closed by the contributor gate on 2026-08-13 as
+unsolicited. Everything below this line is upstream's README, unchanged.
 
 ---
 
